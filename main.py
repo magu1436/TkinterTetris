@@ -11,8 +11,15 @@ HEIGHT = CELL_SIZE * ROWS     # キャンバス高さ
 GRID_COLOR = "#000000"       # グリッド線の色
 BACKGROUND_COLOR = "#CCCCCC" # 背景色
 FALL_INTERVAL = 500           # ミノが1行落下するのに要する時間（ミリ秒）
+FAST_FALL_INTERVAL = 50       # 下キー押下時のミノ落下間隔（ミリ秒）
+MOVE_INTERVAL = 100           # 押し続けたときのミノ移動間隔（ミリ秒）
+# 方向キー（変更可能）
+KEY_LEFT = 'Left'
+KEY_RIGHT = 'Right'
+KEY_DOWN = 'Down'
+KEY_UP = 'Up'
 
-# Mino種別を表す列挙型
+# Mino 種別を表す列挙型
 class Mino(StrEnum):
     I = 'I'
     O = 'O'
@@ -58,104 +65,171 @@ def draw_field(canvas: tk.Canvas) -> None:
         canvas.create_line(0, y, WIDTH, y, fill=GRID_COLOR)
 
 
-def draw_mino(canvas: tk.Canvas, mino_type: Mino, offset_row: int, offset_col: int) -> list[int]:
+def draw_mino(canvas: tk.Canvas, mtype: Mino, row: int, col: int) -> list[int]:
     """
-    指定のMino種別を指定位置に描画する関数
-    offset_row, offset_col はフィールド上のグリッド位置
-    描画した矩形オブジェクトIDのリストを返す
+    ミノを指定位置に描画し、オブジェクトIDリストを返す
     """
-    shape = MINOS[mino_type]
-    color = MINO_COLORS[mino_type]
     ids: list[int] = []
-    for r, c in shape:
-        x1 = (offset_col + c) * CELL_SIZE
-        y1 = (offset_row + r) * CELL_SIZE
-        x2 = x1 + CELL_SIZE
-        y2 = y1 + CELL_SIZE
-        rect_id = canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline=GRID_COLOR)
-        ids.append(rect_id)
+    for r, c in MINOS[mtype]:
+        x1, y1 = (col + c) * CELL_SIZE, (row + r) * CELL_SIZE
+        x2, y2 = x1 + CELL_SIZE, y1 + CELL_SIZE
+        ids.append(canvas.create_rectangle(x1, y1, x2, y2, fill=MINO_COLORS[mtype], outline=GRID_COLOR))
     return ids
 
 
-def spawn_new_mino(canvas: tk.Canvas, field_grid: list[list[bool]], state: dict, start_col: int, root: tk.Tk) -> None:
+def hard_drop(canvas: tk.Canvas, field: list[list[bool]], state: dict, start_col: int, root: tk.Tk) -> None:
     """
-    新しいミノを生成し、フィールド上部に描画、落下処理を開始する関数
-    state: 辞書でミノの状態（mino_type, current_row, max_r, current_ids）を管理
+    ハードドロップ: 現在位置から一気に落下させ固定し次ミノを生成
     """
-    # ランダムにミノ種を選択
-    mino_type = random.choice(list(Mino))
-    current_row = 0
-    max_r = max(r for r, _ in MINOS[mino_type])
-    # 既存オブジェクトがあれば削除せずにそのまま残す（固定ブロック）
-    # 新ミノを描画
-    current_ids = draw_mino(canvas, mino_type, current_row, start_col)
-    # state を更新
-    state.clear()
-    state['mino_type'] = mino_type
-    state['current_row'] = current_row
-    state['max_r'] = max_r
-    state['current_ids'] = current_ids
-    # 落下処理をスケジュール
-    root.after(FALL_INTERVAL, lambda: drop(canvas, field_grid, state, start_col, root))
+    mtype, row, col, ids = state['type'], state['row'], state['col'], state['ids']
+    # 最大落下距離を計算
+    drop_distance = ROWS
+    for r, c in MINOS[mtype]:
+        dist = 0
+        while True:
+            nr = row + r + dist + 1
+            nc = col + c
+            if nr >= ROWS or field[nr][nc]:
+                break
+            dist += 1
+        drop_distance = min(drop_distance, dist)
+    # 現ミノ削除
+    for oid in ids:
+        canvas.delete(oid)
+    # 座標更新
+    row += drop_distance
+    state['row'] = row
+    # 再描画
+    state['ids'] = draw_mino(canvas, mtype, row, col)
+    # 固定
+    for r, c in MINOS[mtype]:
+        field[row + r][col + c] = True
+    # 新ミノ生成
+    spawn_new_mino(canvas, field, state, start_col, root)
 
 
-def drop(canvas: tk.Canvas, field_grid: list[list[bool]], state: dict, start_col: int, root: tk.Tk) -> None:
+def spawn_new_mino(canvas: tk.Canvas, field: list[list[bool]], state: dict, start_col: int, root: tk.Tk) -> None:
     """
-    現在のミノを1行落下させ、衝突判定を行う関数
-    衝突した場合はミノをフィールドに固定し、新しいミノを生成する
+    新しいミノを生成し、落下処理をスケジュールする関数
     """
-    mino_type = state['mino_type']
-    current_row = state['current_row']
+    # 既存の落下スケジュールをキャンセル
+    if state.get('drop_job'):
+        root.after_cancel(state['drop_job'])
+    # ミノ選択・初期化
+    mtype = random.choice(list(Mino))
+    row = 0
+    col = start_col
+    max_r = max(r for r, _ in MINOS[mtype])
+    # 描画
+    ids = draw_mino(canvas, mtype, row, col)
+    # 状態更新
+    state.update({
+        'type': mtype,
+        'row': row,
+        'col': col,
+        'max_r': max_r,
+        'ids': ids,
+        'down': False
+    })
+    # 落下開始
+    job = root.after(FALL_INTERVAL, lambda: drop(canvas, field, state, start_col, root))
+    state['drop_job'] = job
+
+
+def drop(canvas: tk.Canvas, field: list[list[bool]], state: dict, start_col: int, root: tk.Tk) -> None:
+    """
+    ミノを1行落下させ、衝突判定・固定・次ミノ生成を行う関数
+    """
+    mtype = state['type']
+    row = state['row']
+    col = state['col']
     max_r = state['max_r']
-    current_ids = state['current_ids']
-    # 次位置の衝突判定
-    can_move = True
-    for r, c in MINOS[mino_type]:
-        nr = current_row + r + 1
-        nc = start_col + c
-        if nr >= ROWS or field_grid[nr][nc]:
-            can_move = False
+    ids = state['ids']
+    down = state['down']
+    # 衝突判定
+    collision = False
+    for r, c in MINOS[mtype]:
+        nr, nc = row + r + 1, col + c
+        if nr >= ROWS or field[nr][nc]:
+            collision = True
             break
-    if can_move:
-        # 旧ミノを削除
-        for obj_id in current_ids:
-            canvas.delete(obj_id)
-        # 行を下げる
-        current_row += 1
-        # 再描画
-        current_ids = draw_mino(canvas, mino_type, current_row, start_col)
-        # state 更新
-        state['current_row'] = current_row
-        state['current_ids'] = current_ids
-        # 次の落下をスケジュール
-        root.after(FALL_INTERVAL, lambda: drop(canvas, field_grid, state, start_col, root))
-    else:
-        # フィールドに固定
-        for r, c in MINOS[mino_type]:
-            fr = current_row + r
-            fc = start_col + c
-            field_grid[fr][fc] = True
+    if collision:
+        # 固定
+        for r, c in MINOS[mtype]:
+            field[row + r][col + c] = True
         # 次ミノ生成
-        spawn_new_mino(canvas, field_grid, state, start_col, root)
+        spawn_new_mino(canvas, field, state, start_col, root)
+        return
+    # 削除
+    for oid in ids:
+        canvas.delete(oid)
+    # 位置更新・再描画
+    row += 1
+    state['row'] = row
+    state['ids'] = draw_mino(canvas, mtype, row, col)
+    # 次回スケジュール
+    interval = FAST_FALL_INTERVAL if down else FALL_INTERVAL
+    job = root.after(interval, lambda: drop(canvas, field, state, start_col, root))
+    state['drop_job'] = job
+
+
+def try_move(canvas: tk.Canvas, field: list[list[bool]], state: dict, direction: int) -> None:
+    """
+    左右移動の衝突判定と移動処理
+    """
+    mtype = state['type']
+    row = state['row']
+    col = state['col']
+    ids = state['ids']
+    newc = col + direction
+    # 範囲外・衝突チェック
+    for r, c in MINOS[mtype]:
+        if newc + c < 0 or newc + c >= COLUMNS or field[row + r][newc + c]:
+            return
+    # 移動
+    for oid in ids:
+        canvas.delete(oid)
+    state['col'] = newc
+    state['ids'] = draw_mino(canvas, mtype, row, newc)
+
+
+def handle_move(canvas: tk.Canvas, field: list[list[bool]], state: dict, root: tk.Tk) -> None:
+    """
+    方向キー入力に応じた連続移動・高速落下を処理する
+    """
+    if state.get('left'):
+        try_move(canvas, field, state, -1)
+    if state.get('right'):
+        try_move(canvas, field, state, 1)
+    # 継続スケジュール
+    root.after(MOVE_INTERVAL, lambda: handle_move(canvas, field, state, root))
 
 
 def main() -> None:
     root = tk.Tk()
     root.title("Tetris Field")
-
     canvas = tk.Canvas(root, width=WIDTH, height=HEIGHT)
     canvas.pack()
 
-    # フィールドグリッド状態: True=ブロックがある
-    field_grid: list[list[bool]] = [[False] * COLUMNS for _ in range(ROWS)]
-
+    # フィールド状態: True=ブロックあり
+    field = [[False] * COLUMNS for _ in range(ROWS)]
     draw_field(canvas)
-    # ミノ状態用辞書
-    state: dict = {}
-    start_col = (COLUMNS // 2) - 2
 
-    # ゲーム開始: 最初のミノを生成
-    spawn_new_mino(canvas, field_grid, state, start_col, root)
+    # 状態管理辞書
+    state: dict = {'left': False, 'right': False, 'down': False, 'drop_job': None}
+
+    # キーバインド設定
+    root.bind(f"<KeyPress-{KEY_LEFT}>", lambda e: state.update(left=True))
+    root.bind(f"<KeyRelease-{KEY_LEFT}>", lambda e: state.update(left=False))
+    root.bind(f"<KeyPress-{KEY_RIGHT}>", lambda e: state.update(right=True))
+    root.bind(f"<KeyRelease-{KEY_RIGHT}>", lambda e: state.update(right=False))
+    root.bind(f"<KeyPress-{KEY_DOWN}>", lambda e: state.update(down=True))
+    root.bind(f"<KeyRelease-{KEY_DOWN}>", lambda e: state.update(down=False))
+    root.bind(f"<KeyPress-{KEY_UP}>", lambda e: hard_drop(canvas, field, state, (COLUMNS // 2) - 2, root))
+
+    # 継続処理開始
+    handle_move(canvas, field, state, root)
+    spawn_new_mino(canvas, field, state, (COLUMNS // 2) - 2, root)
 
     root.mainloop()
 
