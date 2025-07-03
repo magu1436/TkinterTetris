@@ -31,6 +31,8 @@ KEY_ROTATE_RIGHT = 'e'
 KEY_ROTATE_LEFT = 'q'
 ```
 
+Most of this program was developed via vibe coding with ChatGPT's `o4-mini-high` model.
+
 ---
 
 # Tkinterテトリス
@@ -56,4 +58,6 @@ python main.py
 - **左回転**: `q`
 
 これらのバインドは `main.py` の冒頭で定義されており、値を変更することで好きなキーに変更できます。
+
+なお、このプログラムの大部分は ChatGPT の `o4-mini-high` モデルを併用したバイブコーディングによって作成されました。
 
