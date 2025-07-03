@@ -10,9 +10,10 @@ WIDTH = CELL_SIZE * COLUMNS   # キャンバス幅
 HEIGHT = CELL_SIZE * ROWS     # キャンバス高さ
 GRID_COLOR = "#000000"       # グリッド線の色
 BACKGROUND_COLOR = "#CCCCCC" # 背景色
-FALL_INTERVAL = 500           # ミノが1行落下するのに要する時間（ミリ秒）
-FAST_FALL_INTERVAL = 50       # 下キー押下時のミノ落下間隔（ミリ秒）
-MOVE_INTERVAL = 100           # 押し続けたときのミノ移動間隔（ミリ秒）
+FALL_INTERVAL = 500           # ミノが1行落下するミリ秒
+FAST_FALL_INTERVAL = 50       # 下キー押下時のミリ秒
+MOVE_INTERVAL = 100           # ミノ移動間隔（ミリ秒）
+
 # キー定義（変更可能）
 KEY_LEFT = 'Left'
 KEY_RIGHT = 'Right'
@@ -23,24 +24,19 @@ KEY_ROTATE_LEFT = 'q'
 
 # Mino 種別を表す列挙型
 class Mino(StrEnum):
-    I = 'I'
-    O = 'O'
-    S = 'S'
-    Z = 'Z'
-    J = 'J'
-    L = 'L'
-    T = 'T'
+    I = 'I'; O = 'O'; S = 'S'; Z = 'Z'; J = 'J'; L = 'L'; T = 'T'
 
 # 基本ミノ定義
 BASE_MINOS = {
-    Mino.I: [(0, 0), (0, 1), (0, 2), (0, 3)],
-    Mino.O: [(0, 0), (0, 1), (1, 0), (1, 1)],
-    Mino.S: [(0, 1), (0, 2), (1, 0), (1, 1)],
-    Mino.Z: [(0, 0), (0, 1), (1, 1), (1, 2)],
-    Mino.J: [(0, 0), (1, 0), (1, 1), (1, 2)],
-    Mino.L: [(0, 2), (1, 0), (1, 1), (1, 2)],
-    Mino.T: [(0, 1), (1, 0), (1, 1), (1, 2)],
+    Mino.I: [(0,0),(0,1),(0,2),(0,3)],
+    Mino.O: [(0,0),(0,1),(1,0),(1,1)],
+    Mino.S: [(0,1),(0,2),(1,0),(1,1)],
+    Mino.Z: [(0,0),(0,1),(1,1),(1,2)],
+    Mino.J: [(0,0),(1,0),(1,1),(1,2)],
+    Mino.L: [(0,2),(1,0),(1,1),(1,2)],
+    Mino.T: [(0,1),(1,0),(1,1),(1,2)],
 }
+
 # ミノカラー定義
 MINO_COLORS = {
     Mino.I: '#00FFFF',
@@ -51,192 +47,175 @@ MINO_COLORS = {
     Mino.L: '#FFA500',
     Mino.T: '#800080',
 }
-# 回転軸定義 (SRSに準拠したおおよその中心)
+
+# 回転軸定義 (簡易SRS)
 PIVOTS = {
-    Mino.I: (0.5, 1.5),
-    Mino.O: (0.5, 0.5),
-    Mino.S: (1, 1),
-    Mino.Z: (1, 1),
-    Mino.J: (1, 1),
-    Mino.L: (1, 1),
-    Mino.T: (1, 1),
+    Mino.I: (0.5,1.5), Mino.O: (0.5,0.5),
+    Mino.S: (1,1), Mino.Z: (1,1),
+    Mino.J: (1,1), Mino.L: (1,1), Mino.T: (1,1),
 }
 
+# グリッド状態とブロックID保持
+field_grid = [[False]*COLUMNS for _ in range(ROWS)]
+block_ids = [[None]*COLUMNS for _ in range(ROWS)]
+
 # ユーティリティ関数
-def rotate_shape(shape, mtype, direction):
-    """
-    SRS風の回転: direction=1で右回転、-1で左回転
-    回転軸PIVOTS[mtype]を中心にブロックを回転させる
-    """
-    pivot_r, pivot_c = PIVOTS[mtype]
-    new_shape = []
-    for r, c in shape:
-        dr = r - pivot_r
-        dc = c - pivot_c
-        if direction == 1:  # 右回転: (dr,dc)->( -dc, dr )? or (dc, -dr)? For Tetris clockwise uses (dr,dc)->(dc, -dr)
-            nr = pivot_r + dc
-            nc = pivot_c - dr
-        else:  # 左回転: (dr,dc)->(-dc, dr)
-            nr = pivot_r - dc
-            nc = pivot_c + dr
-        new_shape.append((int(round(nr)), int(round(nc))))
-    return new_shape
-
-
 def valid_position(field, shape, row, col):
-    for r, c in shape:
-        nr = row + r
-        nc = col + c
-        if nc < 0 or nc >= COLUMNS or nr < 0 or nr >= ROWS or field[nr][nc]:
+    for r,c in shape:
+        nr, nc = row+r, col+c
+        if nc<0 or nc>=COLUMNS or nr<0 or nr>=ROWS or field[nr][nc]:
             return False
     return True
 
+def rotate_shape(shape, mtype, direction):
+    pr,pc = PIVOTS[mtype]
+    out = []
+    for r,c in shape:
+        dr,dc = r-pr, c-pc
+        if direction==1:
+            nr, nc = pr+dc, pc-dr
+        else:
+            nr, nc = pr-dc, pc+dr
+        out.append((int(round(nr)), int(round(nc))))
+    return out
+
 # 描画関数
 def draw_field(canvas):
-    canvas.create_rectangle(0, 0, WIDTH, HEIGHT, fill=BACKGROUND_COLOR, outline="")
-    for col in range(COLUMNS + 1):
-        x = col * CELL_SIZE
-        canvas.create_line(x, 0, x, HEIGHT, fill=GRID_COLOR)
-    for row in range(ROWS + 1):
-        y = row * CELL_SIZE
-        canvas.create_line(0, y, WIDTH, y, fill=GRID_COLOR)
+    canvas.create_rectangle(0,0,WIDTH,HEIGHT,fill=BACKGROUND_COLOR,outline="")
+    for i in range(COLUMNS+1): canvas.create_line(i*CELL_SIZE,0,i*CELL_SIZE,HEIGHT,fill=GRID_COLOR)
+    for i in range(ROWS+1):    canvas.create_line(0,i*CELL_SIZE,WIDTH,i*CELL_SIZE,fill=GRID_COLOR)
 
-def draw_mino(canvas, shape, row, col, color):
-    ids = []
-    for r, c in shape:
-        x1 = (col + c) * CELL_SIZE
-        y1 = (row + r) * CELL_SIZE
-        ids.append(canvas.create_rectangle(x1, y1, x1 + CELL_SIZE, y1 + CELL_SIZE,
-                                          fill=color, outline=GRID_COLOR))
-    return ids
+def draw_cell(canvas,row,col,color):
+    x,y = col*CELL_SIZE, row*CELL_SIZE
+    return canvas.create_rectangle(x,y,x+CELL_SIZE,y+CELL_SIZE,fill=color,outline=GRID_COLOR)
 
-# 固定ミノリスト保持: Trueならブロックあり
-field_grid = [[False] * COLUMNS for _ in range(ROWS)]
+def clear_lines(canvas):
+    r = ROWS-1
+    while r>=0:
+        if all(field_grid[r][c] for c in range(COLUMNS)):
+            # 削除
+            for c in range(COLUMNS):
+                oid = block_ids[r][c]; canvas.delete(oid)
+            # 下げる
+            for rr in range(r-1,-1,-1):
+                for c in range(COLUMNS):
+                    oid = block_ids[rr][c]
+                    if oid: canvas.move(oid,0,CELL_SIZE)
+                    block_ids[rr+1][c] = block_ids[rr][c]
+                    field_grid[rr+1][c] = field_grid[rr][c]
+            # クリア最上行
+            for c in range(COLUMNS): block_ids[0][c]=None; field_grid[0][c]=False
+        else:
+            r-=1
 
-# ハードドロップ実装
+# ハードドロップ
+
 def hard_drop(canvas, field, state, start_col, root):
-    mtype = state['type']
-    row = state['row']
-    col = state['col']
-    shape = state['shape']
-    ids = state['ids']
-    # 落下可能距離計算
-    dist = ROWS
-    for r, c in shape:
-        d = 0
+    mtype = state['type']; row = state['row']; col = state['col'];
+    shape = state['shape']; ids = state['ids']
+    # 最大落下距離計算
+    min_dist = ROWS
+    for sr,sc in shape:
+        dist=0
         while True:
-            if row + r + d + 1 >= ROWS or field[row + r + d + 1][col + c]:
-                break
-            d += 1
-        dist = min(dist, d)
-    # 削除 & 移動
-    for oid in ids:
-        canvas.delete(oid)
-    new_row = row + dist
-    new_ids = draw_mino(canvas, shape, new_row, col, MINO_COLORS[mtype])
-    # 固定
-    for r, c in shape:
-        field[new_row + r][col + c] = True
-    # 次ミノ生成
-    spawn_new_mino(canvas, field, state, start_col, root)
+            nr = row+sr+dist+1
+            if nr>=ROWS or field[nr][col+sc]: break
+            dist+=1
+        min_dist = min(min_dist, dist)
+    # 削除
+    for oid in ids: canvas.delete(oid)
+    # 固定配置
+    for sr,sc in shape:
+        r1 = row+sr+min_dist; c1 = col+sc
+        oid = draw_cell(canvas,r1,c1,MINO_COLORS[mtype])
+        block_ids[r1][c1] = oid
+        field[r1][c1] = True
+    clear_lines(canvas)
+    spawn_new_mino(canvas,field,state,start_col,root)
 
-# ミノ生成
+# 新ミノ生成
+
 def spawn_new_mino(canvas, field, state, start_col, root):
-    if state.get('drop_job'):
-        root.after_cancel(state['drop_job'])
-    mtype = random.choice(list(Mino))
-    shape = BASE_MINOS[mtype]
-    row, col = 0, start_col
-    ids = draw_mino(canvas, shape, row, col, MINO_COLORS[mtype])
-    state.update({'type': mtype, 'shape': shape, 'row': row, 'col': col, 'ids': ids, 'down': False})
-    job = root.after(FALL_INTERVAL, lambda: drop(canvas, field, state, start_col, root))
-    state['drop_job'] = job
+    if state.get('job'): root.after_cancel(state['job'])
+    mtype = random.choice(list(Mino)); shape = BASE_MINOS[mtype]
+    row,col = 0,start_col
+    ids = [draw_cell(canvas,row+sr,col+sc,MINO_COLORS[mtype]) for sr,sc in shape]
+    state.update(type=mtype,shape=shape,row=row,col=col,ids=ids,down=False)
+    job = root.after(FALL_INTERVAL, lambda: drop(canvas,field,state,start_col,root))
+    state['job']=job
 
 # 自動落下
+
 def drop(canvas, field, state, start_col, root):
-    mtype = state['type']
-    shape = state['shape']
-    row = state['row']
-    col = state['col']
-    ids = state['ids']
-    down = state['down']
-    collision = False
-    for r, c in shape:
-        if row + r + 1 >= ROWS or field[row + r + 1][col + c]:
-            collision = True
-            break
-    if collision:
-        for r, c in shape:
-            field[row + r][col + c] = True
-        return spawn_new_mino(canvas, field, state, start_col, root)
-    for oid in ids:
-        canvas.delete(oid)
-    new_row = row + 1
-    new_ids = draw_mino(canvas, shape, new_row, col, MINO_COLORS[mtype])
-    state.update({'row': new_row, 'ids': new_ids})
+    mtype,shape,row,col,ids,down = (
+        state['type'],state['shape'],state['row'],state['col'],state['ids'],state['down']
+    )
+    # 衝突?
+    for sr,sc in shape:
+        nr=row+sr+1
+        if nr>=ROWS or field[nr][col+sc]:
+            # 固定
+            for i,(sr2,sc2) in enumerate(shape):
+                r1=row+sr2; c1=col+sc2
+                block_ids[r1][c1]=ids[i]; field[r1][c1]=True
+            clear_lines(canvas)
+            return spawn_new_mino(canvas,field,state,start_col,root)
+    # 移動
+    for oid in ids: canvas.delete(oid)
+    row+=1; state['row']=row
+    new_ids=[draw_cell(canvas,row+sr,col+sc,MINO_COLORS[mtype]) for sr,sc in shape]
+    state['ids']=new_ids
     interval = FAST_FALL_INTERVAL if down else FALL_INTERVAL
-    job = root.after(interval, lambda: drop(canvas, field, state, start_col, root))
-    state['drop_job'] = job
+    job = root.after(interval, lambda: drop(canvas,field,state,start_col,root))
+    state['job']=job
 
 # 左右移動
-def try_move(canvas, field, state, direction):
-    shape = state['shape']
-    row = state['row']
-    col = state['col']
-    ids = state['ids']
-    new_col = col + direction
-    if not valid_position(field, shape, row, new_col):
-        return
-    for oid in ids:
-        canvas.delete(oid)
-    new_ids = draw_mino(canvas, shape, row, new_col, MINO_COLORS[state['type']])
-    state.update({'col': new_col, 'ids': new_ids})
 
-# 回転処理
+def try_move(canvas, field, state, direction):
+    row,col=state['row'],state['col']; shape=state['shape']; ids=state['ids']
+    newc=col+direction
+    if not valid_position(field,shape,row,newc): return
+    for oid in ids: canvas.delete(oid)
+    state['col']=newc
+    state['ids']=[draw_cell(canvas,row+sr,newc+sc,MINO_COLORS[state['type']]) for sr,sc in shape]
+
+# 回転
+
 def rotate_mino(canvas, field, state, direction):
-    mtype = state['type']
-    shape = state['shape']
-    row = state['row']
-    col = state['col']
-    ids = state['ids']
-    new_shape = rotate_shape(shape, mtype, direction)
-    if not valid_position(field, new_shape, row, col):
-        return
-    for oid in ids:
-        canvas.delete(oid)
-    new_ids = draw_mino(canvas, new_shape, row, col, MINO_COLORS[mtype])
-    state.update({'shape': new_shape, 'ids': new_ids})
+    mt,shape,row,col,ids = (
+        state['type'],state['shape'],state['row'],state['col'],state['ids']
+    )
+    new_shape=rotate_shape(shape,mt,direction)
+    if not valid_position(field,new_shape,row,col): return
+    for oid in ids: canvas.delete(oid)
+    state['shape']=new_shape
+    state['ids']=[draw_cell(canvas,row+sr,col+sc,MINO_COLORS[mt]) for sr,sc in new_shape]
 
 # 移動ハンドラ
-def handle_move(canvas, field, state, root):
-    if state.get('left'):
-        try_move(canvas, field, state, -1)
-    if state.get('right'):
-        try_move(canvas, field, state, 1)
-    root.after(MOVE_INTERVAL, lambda: handle_move(canvas, field, state, root))
 
-# メイン関数
+def handle_move(canvas, field, state, root):
+    if state.get('left'): try_move(canvas,field,state,-1)
+    if state.get('right'): try_move(canvas,field,state,1)
+    root.after(MOVE_INTERVAL, lambda: handle_move(canvas,field,state,root))
+
+# メイン
+
 def main():
-    root = tk.Tk()
-    root.title("Tetris Field")
-    canvas = tk.Canvas(root, width=WIDTH, height=HEIGHT)
-    canvas.pack()
+    root=tk.Tk(); root.title("Tetris Field")
+    canvas=tk.Canvas(root,width=WIDTH,height=HEIGHT); canvas.pack()
     draw_field(canvas)
-    state = {'left': False, 'right': False, 'down': False, 'drop_job': None}
-    # キーバインド設定
-    root.bind(f"<KeyPress-{KEY_LEFT}>", lambda e: state.update(left=True))
-    root.bind(f"<KeyRelease-{KEY_LEFT}>", lambda e: state.update(left=False))
-    root.bind(f"<KeyPress-{KEY_RIGHT}>", lambda e: state.update(right=True))
-    root.bind(f"<KeyRelease-{KEY_RIGHT}>", lambda e: state.update(right=False))
-    root.bind(f"<KeyPress-{KEY_DOWN}>", lambda e: state.update(down=True))
-    root.bind(f"<KeyRelease-{KEY_DOWN}>", lambda e: state.update(down=False))
-    root.bind(f"<KeyPress-{KEY_UP}>", lambda e: hard_drop(canvas, field_grid, state, (COLUMNS // 2) - 2, root))
-    root.bind(f"<KeyPress-{KEY_ROTATE_RIGHT}>", lambda e: rotate_mino(canvas, field_grid, state, 1))
-    root.bind(f"<KeyPress-{KEY_ROTATE_LEFT}>", lambda e: rotate_mino(canvas, field_grid, state, -1))
-    # 継続処理開始
-    handle_move(canvas, field_grid, state, root)
-    spawn_new_mino(canvas, field_grid, state, (COLUMNS // 2) - 2, root)
+    state={'left':False,'right':False,'down':False,'job':None}
+    root.bind(f"<KeyPress-{KEY_LEFT}>",lambda e: state.update(left=True))
+    root.bind(f"<KeyRelease-{KEY_LEFT}>",lambda e: state.update(left=False))
+    root.bind(f"<KeyPress-{KEY_RIGHT}>",lambda e: state.update(right=True))
+    root.bind(f"<KeyRelease-{KEY_RIGHT}>",lambda e: state.update(right=False))
+    root.bind(f"<KeyPress-{KEY_DOWN}>",lambda e: state.update(down=True))
+    root.bind(f"<KeyRelease-{KEY_DOWN}>",lambda e: state.update(down=False))
+    root.bind(f"<KeyPress-{KEY_UP}>",lambda e: hard_drop(canvas,field_grid,state,(COLUMNS//2)-2,root))
+    root.bind(f"<KeyPress-{KEY_ROTATE_RIGHT}>",lambda e: rotate_mino(canvas,field_grid,state,1))
+    root.bind(f"<KeyPress-{KEY_ROTATE_LEFT}>",lambda e: rotate_mino(canvas,field_grid,state,-1))
+    handle_move(canvas,field_grid,state,root)
+    spawn_new_mino(canvas,field_grid,state,(COLUMNS//2)-2,root)
     root.mainloop()
 
-if __name__ == "__main__":
-    main()
+if __name__=="__main__": main()
